@@ -9,3 +9,6 @@ vaderSentiment==3.3.2
 python-dotenv==1.0.1
 reportlab==4.2.5
 aiofiles==24.1.0
+sqlmodel==0.0.21
+pydantic==2.10.4
+slowapi==0.1.9

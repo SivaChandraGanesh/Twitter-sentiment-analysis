@@ -27,17 +27,19 @@ export interface UploadResponse {
 }
 
 export interface BeforeAfterSample {
-  raw: string;
-  cleaned_text: string;
-  cleaned_tokens: string[];
+  before: string;
+  after: string;
 }
 
+
 export interface DashboardData {
-  sentiment_counts: Record<string, number>;
-  emotion_counts: Record<string, number>;
+  sentiment_distribution: Record<string, number>;
+  emotion_distribution: Record<string, number>;
   sentiment_over_time: { date: string; Positive: number; Negative: number; Neutral: number }[];
   top_words: { word: string; count: number }[];
+  total: number;
 }
+
 
 export interface InsightsSummary {
   summary: string;
