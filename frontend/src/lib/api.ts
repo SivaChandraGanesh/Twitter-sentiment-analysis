@@ -8,9 +8,11 @@ import type {
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+export const WS_BASE = API_BASE.replace(/^http/, "ws");
 
 const client = axios.create({ baseURL: API_BASE, timeout: 60000 });
 
+// ── Upload ──────────────────────────────────────────────────────────
 export async function uploadCsv(file: File): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
@@ -20,13 +22,7 @@ export async function uploadCsv(file: File): Promise<UploadResponse> {
   return data;
 }
 
-export async function getPreview(limit = 50) {
-  const { data } = await client.get<{ preview: unknown[]; total: number }>(
-    `/api/dataset/preview?limit=${limit}`
-  );
-  return data;
-}
-
+// ── Preprocessing ───────────────────────────────────────────────────
 export async function preprocess(): Promise<{
   message: string;
   before_after: BeforeAfterSample[];
@@ -36,6 +32,7 @@ export async function preprocess(): Promise<{
   return data;
 }
 
+// ── Sentiment & Emotion ─────────────────────────────────────────────
 export async function runSentiment(): Promise<{
   total: number;
   counts: Record<string, number>;
@@ -54,6 +51,12 @@ export async function runEmotion(): Promise<{
   return data;
 }
 
+export async function analyzeSingleTweet(tweet: string): Promise<SentimentResponse> {
+  const { data } = await client.post<SentimentResponse>("/api/analyze/single", { tweet });
+  return data;
+}
+
+// ── Visualizations / Dashboard ──────────────────────────────────────
 export async function getDashboardData(params?: {
   sentiment_filter?: string;
 }): Promise<DashboardData> {
@@ -66,6 +69,14 @@ export async function getInsightsSummary(): Promise<InsightsSummary> {
   return data;
 }
 
+export async function getPreview(limit = 50) {
+  const { data } = await client.get<{ preview: unknown[]; total: number }>(
+    `/api/dataset/preview?limit=${limit}`
+  );
+  return data;
+}
+
+// ── Reports ─────────────────────────────────────────────────────────
 export function getCsvExportUrl(): string {
   return `${API_BASE}/api/export/csv`;
 }
@@ -79,11 +90,42 @@ export async function exportReportText(): Promise<{ report: string }> {
   return data;
 }
 
-export async function analyzeSingleTweet(tweet: string): Promise<SentimentResponse> {
-  const { data } = await client.post<SentimentResponse>("/api/analyze/single", { tweet });
+// ── Real-Time Stream Controls ────────────────────────────────────────
+export async function startStream(interval = 2.0) {
+  const { data } = await client.post(`/api/stream/start?interval=${interval}`);
   return data;
 }
 
+export async function stopStream() {
+  const { data } = await client.post("/api/stream/stop");
+  return data;
+}
+
+export async function pauseStream() {
+  const { data } = await client.post("/api/stream/pause");
+  return data;
+}
+
+export async function resetStream() {
+  const { data } = await client.post("/api/stream/reset");
+  return data;
+}
+
+export async function getStreamStatus(): Promise<{
+  running: boolean;
+  clients: number;
+  stats: {
+    total: number;
+    sentiment: Record<string, number>;
+    emotion: Record<string, number>;
+    started_at: string | null;
+  };
+}> {
+  const { data } = await client.get("/api/stream/status");
+  return data;
+}
+
+// ── Health ───────────────────────────────────────────────────────────
 export async function healthCheck(): Promise<boolean> {
   try {
     await client.get("/api/health");

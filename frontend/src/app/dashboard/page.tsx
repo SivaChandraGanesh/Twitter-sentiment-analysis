@@ -1,170 +1,179 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Header from "@/components/Header";
-import { getDashboardData } from "@/lib/api";
+import { useWebSocket } from "@/lib/useWebSocket";
 import {
-  PieChart, Pie, Cell, BarChart, Bar, LineChart, Line, Area,
-  XAxis, YAxis, ResponsiveContainer, Tooltip, Legend, CartesianGrid,
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
+  AreaChart, Area,
 } from "recharts";
+import { useEffect, useState } from "react";
+import type { LiveRecord } from "@/lib/useWebSocket";
 
-const COLORS = ["#22c55e", "#94a3b8", "#ef4444", "#3b82f6", "#f97316", "#a855f7"];
+const SENTIMENT_COLORS: Record<string, string> = {
+  Positive: "#22c55e", Neutral: "#94a3b8", Negative: "#ef4444",
+};
+const EMOTION_COLORS = ["#fbbf24", "#ef4444", "#3b82f6", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16"];
+
+type TimePoint = { time: string; Positive: number; Negative: number; Neutral: number };
 
 export default function VisualizationsPage() {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<{
-    sentiment_distribution: Record<string, number>;
-    emotion_distribution: Record<string, number>;
-    sentiment_over_time: any[];
-    top_words: any[];
-    total: number;
-  } | null>(null);
+  const { streamRunning, stats, records, latestRecord } = useWebSocket();
+  const [timeData, setTimeData] = useState<TimePoint[]>([]);
 
+  // Build rolling time series from stats updates
   useEffect(() => {
-    fetchVizData();
-  }, []);
+    if (!latestRecord) return;
+    const now = new Date();
+    const label = now.toLocaleTimeString("en-GB", { hour12: false });
+    setTimeData((prev) => {
+      const point: TimePoint = {
+        time: label,
+        Positive: stats.sentiment.Positive || 0,
+        Negative: stats.sentiment.Negative || 0,
+        Neutral: stats.sentiment.Neutral || 0,
+      };
+      // Deduplicate same-second updates
+      if (prev.length && prev[prev.length - 1].time === label) {
+        return [...prev.slice(0, -1), point];
+      }
+      return [...prev, point].slice(-40); // keep last 40 points
+    });
+  }, [latestRecord, stats]);
 
-  const fetchVizData = async () => {
-    try {
-      const res = await getDashboardData();
-      setData(res as any);
-    } catch (e) {
-      console.error("Failed to fetch visualization data", e);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const total = stats.total;
+  const sentimentPie = Object.entries(stats.sentiment)
+    .filter(([, v]) => v > 0)
+    .map(([name, value]) => ({ name, value }));
+  const emotionBar = Object.entries(stats.emotion).map(([name, count], i) => ({
+    name, count, color: EMOTION_COLORS[i % EMOTION_COLORS.length],
+  }));
 
-  const sentimentPie = data ? Object.entries(data.sentiment_distribution).map(([name, value]) => ({ name, value })) : [];
-  const emotionBar = data ? Object.entries(data.emotion_distribution).map(([emotion, value], i) => ({
-    emotion, value, color: COLORS[(i + 3) % COLORS.length]
-  })) : [];
+  // Word "frequency" approximation from records
+  const wordFreq: Record<string, number> = {};
+  records.slice(0, 100).forEach((r) => {
+    (r.clean_text || r.text || "").split(/\s+/).forEach((w) => {
+      if (w.length > 3) wordFreq[w] = (wordFreq[w] || 0) + 1;
+    });
+  });
+  const topWords = Object.entries(wordFreq).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([word, count]) => ({ word, count }));
 
   return (
-    <div className="flex flex-col bg-white">
+    <div className="flex flex-col bg-white min-h-screen">
       <Header
-        title="Visualizations"
-        breadcrumbs={["Analytics", "Visualizations"]}
-        subtitle="Full analytical view of your sentiment and emotion trends."
+        title="Live Visualizations"
+        breadcrumbs={["Analytics", "Charts"]}
+        subtitle="All charts update automatically as new data streams in. No refresh needed."
       />
-      <div className="flex-1 p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <div />
-          <button
-            onClick={fetchVizData}
-            className="flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            <span>🔄</span> Refresh Data
-          </button>
-        </div>
-
-        {/* KPI Cards */}
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-gray-500">Total Samples</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{data?.total.toLocaleString() || "0"}</p>
-          </div>
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-gray-500">Sentiment Groups</p>
-            <p className="mt-1 text-2xl font-bold text-gray-900">{sentimentPie.length}</p>
-          </div>
-          <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-gray-500">Data Status</p>
-            <div className="mt-1 flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${loading ? "bg-orange-500" : "bg-green-500"}`}></span>
-              <p className="text-sm font-semibold text-gray-900">{loading ? "Updating..." : "Live Sync"}</p>
-            </div>
-          </div>
+      <div className="flex-1 p-6 space-y-6">
+        {/* Connection badge */}
+        <div className="flex items-center gap-2">
+          <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${streamRunning ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+            }`}>
+            <span className={`h-2 w-2 rounded-full ${streamRunning ? "bg-green-500 animate-pulse" : "bg-gray-300"}`} />
+            {streamRunning ? "LIVE — Charts morphing every ~2 seconds" : "Stream paused"}
+          </span>
+          <span className="text-xs text-gray-500">{total.toLocaleString()} total records</span>
         </div>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* Sentiment Distribution */}
+          {/* Sentiment Donut */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">Sentiment Distribution</h3>
-            <div className="relative h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={sentimentPie}
-                    cx="50%" cy="50%"
-                    innerRadius={60} outerRadius={100}
-                    dataKey="value"
-                  >
-                    {sentimentPie.map((_, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-                <p className="text-xs font-bold text-gray-400">DISTRIBUTION</p>
-                <p className="text-2xl font-bold text-blue-600">Polarity</p>
+            <h3 className="mb-4 font-semibold text-gray-900">Sentiment Distribution</h3>
+            {sentimentPie.length === 0 ? (
+              <div className="flex h-48 items-center justify-center text-gray-400">Start the stream to see data</div>
+            ) : (
+              <div className="relative h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={sentimentPie} cx="50%" cy="50%" innerRadius={60} outerRadius={90} dataKey="value">
+                      {sentimentPie.map((entry) => (
+                        <Cell key={entry.name} fill={SENTIMENT_COLORS[entry.name] ?? "#6366f1"} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <p className="text-2xl font-bold text-gray-900">{total.toLocaleString()}</p>
+                  <p className="text-xs text-gray-400">records</p>
+                </div>
               </div>
+            )}
+            <div className="mt-4 flex justify-center gap-6">
+              {sentimentPie.map(e => (
+                <div key={e.name} className="flex items-center gap-1.5 text-xs">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[e.name] }} />
+                  <span className="text-gray-600">{e.name}</span>
+                  <span className="font-semibold text-gray-900">{total > 0 ? Math.round((e.value / total) * 100) : 0}%</span>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* Emotion Breakdown */}
+          {/* Emotion Bar Chart */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">Emotion Breakdown</h3>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={emotionBar} layout="vertical">
-                  <XAxis type="number" />
-                  <YAxis dataKey="emotion" type="category" width={80} />
-                  <Tooltip />
-                  <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                    {emotionBar.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+            <h3 className="mb-4 font-semibold text-gray-900">Emotion Breakdown</h3>
+            {emotionBar.length === 0 ? (
+              <div className="flex h-48 items-center justify-center text-gray-400">Start the stream to see data</div>
+            ) : (
+              <div className="h-56">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={emotionBar} layout="vertical">
+                    <XAxis type="number" tick={{ fontSize: 10 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={70} />
+                    <Tooltip />
+                    <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+                      {emotionBar.map((e, i) => <Cell key={e.name} fill={e.color} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Sentiment Trends */}
-        {data && data.sentiment_over_time.length > 0 && (
-          <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h3 className="mb-4 text-lg font-semibold text-gray-900">Sentiment Trends Over Time</h3>
-            <div className="h-64">
+        {/* Live Trend (area chart) */}
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h3 className="mb-4 font-semibold text-gray-900">Sentiment Trend Over Time (Live)</h3>
+          {timeData.length < 2 ? (
+            <div className="flex h-48 items-center justify-center text-gray-400">
+              Trend will appear after a few seconds of streaming.
+            </div>
+          ) : (
+            <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data.sentiment_over_time}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" />
-                  <YAxis />
+                <AreaChart data={timeData}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                  <XAxis dataKey="time" tick={{ fontSize: 9 }} interval="preserveStartEnd" />
+                  <YAxis tick={{ fontSize: 10 }} />
                   <Tooltip />
                   <Legend />
                   <Area type="monotone" dataKey="Positive" stackId="1" stroke="#22c55e" fill="#22c55e" fillOpacity={0.6} />
-                  <Area type="monotone" dataKey="Neutral" stackId="1" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.6} />
+                  <Area type="monotone" dataKey="Neutral" stackId="1" stroke="#94a3b8" fill="#94a3b8" fillOpacity={0.5} />
                   <Area type="monotone" dataKey="Negative" stackId="1" stroke="#ef4444" fill="#ef4444" fillOpacity={0.6} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+          )}
+        </div>
+
+        {/* Top Keywords */}
+        {topWords.length > 0 && (
+          <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+            <h3 className="mb-4 font-semibold text-gray-900">Top Keywords (from live stream)</h3>
+            <div className="flex flex-wrap gap-2">
+              {topWords.map(({ word, count }, i) => (
+                <span key={word} style={{ fontSize: `${Math.max(12, 12 + count)}px` }}
+                  className="rounded-full bg-blue-50 px-3 py-1 font-medium text-blue-700">
+                  {word} <span className="text-blue-400 text-xs">×{count}</span>
+                </span>
+              ))}
+            </div>
           </div>
         )}
-
-        {/* Word Cloud / Top Terms */}
-        <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h3 className="mb-4 text-lg font-semibold text-gray-900">Keyword Prominence</h3>
-          <div className="flex flex-wrap gap-3">
-            {data?.top_words.map((kw, i) => (
-              <span
-                key={i}
-                className="rounded-full bg-blue-50 px-3 py-1.5 text-blue-700 font-medium"
-                style={{ fontSize: `${Math.min(32, 10 + kw.count * 2)}px` }}
-              >
-                {kw.word}
-              </span>
-            ))}
-            {data?.top_words.length === 0 && <p className="text-sm text-gray-400">Process data to see keywords.</p>}
-          </div>
-        </div>
       </div>
     </div>
   );
 }
-
-// Helper to make AreaChart work with standard import
-import { AreaChart } from "recharts";
