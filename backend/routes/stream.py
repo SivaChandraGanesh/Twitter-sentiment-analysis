@@ -51,7 +51,7 @@ async def api_stop_stream():
 @router.post("/stream/reset")
 async def api_reset_stream():
     await stop_stream()
-    reset_session_stats()
+    reset_session_stats(clear_db=True)
     return {"status": "reset"}
 
 

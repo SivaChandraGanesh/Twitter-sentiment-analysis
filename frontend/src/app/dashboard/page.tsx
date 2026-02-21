@@ -1,13 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Header from "@/components/Header";
 import { useWebSocket } from "@/lib/useWebSocket";
+import { getDashboardData } from "@/lib/api";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend,
   AreaChart, Area,
 } from "recharts";
-import { useEffect, useState } from "react";
 import type { LiveRecord } from "@/lib/useWebSocket";
 
 const SENTIMENT_COLORS: Record<string, string> = {
@@ -20,6 +21,11 @@ type TimePoint = { time: string; Positive: number; Negative: number; Neutral: nu
 export default function VisualizationsPage() {
   const { streamRunning, stats, records, latestRecord } = useWebSocket();
   const [timeData, setTimeData] = useState<TimePoint[]>([]);
+  const [dbViz, setDbViz] = useState<any>(null);
+
+  useEffect(() => {
+    getDashboardData().then(setDbViz).catch(() => null);
+  }, []);
 
   // Build rolling time series from stats updates
   useEffect(() => {
@@ -41,15 +47,26 @@ export default function VisualizationsPage() {
     });
   }, [latestRecord, stats]);
 
-  const total = stats.total;
-  const sentimentPie = Object.entries(stats.sentiment)
-    .filter(([, v]) => v > 0)
+  // Merge stats: Use live data if stream is running, else fallback to DB data
+  const total = streamRunning || stats.total > 0 ? stats.total : (dbViz?.total ?? 0);
+
+  const sentimentSource = streamRunning || stats.total > 0
+    ? stats.sentiment
+    : (dbViz?.sentiment_distribution ?? {});
+
+  const emotionSource = streamRunning || stats.total > 0
+    ? stats.emotion
+    : (dbViz?.emotion_distribution ?? {});
+
+  const sentimentPie = Object.entries(sentimentSource)
+    .filter(([, v]) => (v as number) > 0)
     .map(([name, value]) => ({ name, value }));
-  const emotionBar = Object.entries(stats.emotion).map(([name, count], i) => ({
-    name, count, color: EMOTION_COLORS[i % EMOTION_COLORS.length],
+
+  const emotionBar = Object.entries(emotionSource).map(([name, count], i) => ({
+    name, count: count as number, color: EMOTION_COLORS[i % EMOTION_COLORS.length],
   }));
 
-  // Word "frequency" approximation from records
+  // Word "frequency" approximation from records + DB preview logic
   const wordFreq: Record<string, number> = {};
   records.slice(0, 100).forEach((r) => {
     (r.clean_text || r.text || "").split(/\s+/).forEach((w) => {
@@ -106,7 +123,7 @@ export default function VisualizationsPage() {
                 <div key={e.name} className="flex items-center gap-1.5 text-xs">
                   <span className="h-3 w-3 rounded-full" style={{ backgroundColor: SENTIMENT_COLORS[e.name] }} />
                   <span className="text-gray-600">{e.name}</span>
-                  <span className="font-semibold text-gray-900">{total > 0 ? Math.round((e.value / total) * 100) : 0}%</span>
+                  <span className="font-semibold text-gray-900">{total > 0 ? Math.round(((e.value as number) / total) * 100) : 0}%</span>
                 </div>
               ))}
             </div>

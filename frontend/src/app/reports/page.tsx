@@ -32,15 +32,27 @@ export default function ReportsPage() {
     { emotion: "Anger", value: 5, color: "#ef4444" },
   ]);
 
+  const [sentimentSummary, setSentimentSummary] = useState({
+    Positive: 0, Neutral: 0, Negative: 0, total: 0
+  });
+
   useEffect(() => {
     getInsightsSummary()
       .then((res) => {
-        const counts = (res as { counts?: { emotion?: Record<string, number> } }).counts;
+        const counts = (res as any).counts;
+        if (counts?.sentiment) {
+          setSentimentSummary({
+            Positive: counts.sentiment.Positive || 0,
+            Neutral: counts.sentiment.Neutral || 0,
+            Negative: counts.sentiment.Negative || 0,
+            total: Object.values(counts.sentiment).reduce((a: any, b: any) => a + b, 0) as number
+          });
+        }
         if (counts?.emotion) {
           const colors = ["#3b82f6", "#60a5fa", "#22c55e", "#a855f7", "#ef4444", "#f97316"];
           setEmotionBreakdown(
             Object.entries(counts.emotion).map(([e, v], i) => ({
-              emotion: e, value: v, color: colors[i % colors.length],
+              emotion: e, value: Number(v), color: colors[i % colors.length],
             }))
           );
         }
@@ -117,6 +129,34 @@ export default function ReportsPage() {
               </div>
             </div>
 
+            {/* Sentiment Distribution Summary */}
+            <div className="mb-8 grid gap-4 grid-cols-3">
+              <div className="rounded-xl border border-green-100 bg-green-50 p-4 text-center">
+                <p className="text-2xl mb-1">😊</p>
+                <p className="text-xs font-semibold uppercase text-gray-500">Positive</p>
+                <p className="mt-1 text-2xl font-bold text-green-600">{sentimentSummary.Positive.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400">
+                  {sentimentSummary.total > 0 ? `${Math.round((sentimentSummary.Positive / sentimentSummary.total) * 100)}%` : "0%"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+                <p className="text-2xl mb-1">😐</p>
+                <p className="text-xs font-semibold uppercase text-gray-500">Neutral</p>
+                <p className="mt-1 text-2xl font-bold text-gray-600">{sentimentSummary.Neutral.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400">
+                  {sentimentSummary.total > 0 ? `${Math.round((sentimentSummary.Neutral / sentimentSummary.total) * 100)}%` : "0%"}
+                </p>
+              </div>
+              <div className="rounded-xl border border-red-100 bg-red-50 p-4 text-center">
+                <p className="text-2xl mb-1">😞</p>
+                <p className="text-xs font-semibold uppercase text-gray-500">Negative</p>
+                <p className="mt-1 text-2xl font-bold text-red-500">{sentimentSummary.Negative.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400">
+                  {sentimentSummary.total > 0 ? `${Math.round((sentimentSummary.Negative / sentimentSummary.total) * 100)}%` : "0%"}
+                </p>
+              </div>
+            </div>
+
             {/* Emotion Breakdown Chart */}
             {sections.emotion && (
               <div className="mb-6">
@@ -175,8 +215,8 @@ export default function ReportsPage() {
                       <td className="px-4 py-3 font-medium text-gray-900">{row.attribute}</td>
                       <td className="px-4 py-3">
                         <span className={`font-medium ${row.impactColor === "green" ? "text-green-600"
-                            : row.impactColor === "red" ? "text-red-600"
-                              : "text-gray-600"
+                          : row.impactColor === "red" ? "text-red-600"
+                            : "text-gray-600"
                           }`}>
                           {row.impact}
                         </span>

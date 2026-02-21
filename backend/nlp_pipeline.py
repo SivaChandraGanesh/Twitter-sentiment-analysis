@@ -20,6 +20,22 @@ try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
     nltk.download("punkt", quiet=True)
+try:
+    nltk.data.find("corpora/brown")
+except LookupError:
+    nltk.download("brown", quiet=True)
+try:
+    nltk.data.find("sentiment/vader_lexicon")
+except LookupError:
+    nltk.download("vader_lexicon", quiet=True)
+try:
+    nltk.data.find("help/tagsets")
+except LookupError:
+    nltk.download("averaged_perceptron_tagger", quiet=True)
+try:
+    nltk.data.find("corpora/wordnet")
+except LookupError:
+    nltk.download("wordnet", quiet=True)
 
 STOP_WORDS = set(nltk.corpus.stopwords.words("english"))
 VADER = SentimentIntensityAnalyzer()
@@ -95,18 +111,25 @@ def sentiment_classifier(text: str) -> Tuple[str, float]:
     return label, round(conf, 2)
 
 
-def emotion_detector(text: str) -> str:
-    """Multi-class emotion: Happy, Angry, Sad, Fear, Neutral."""
-    if not text or not str(text).strip():
+def emotion_detector(text: str, tokens: List[str] = None) -> str:
+    """Multi-class emotion: Happy, Angry, Sad, Fear, Neutral. Optimized to reuse tokens."""
+    if not text and not tokens:
         return "Neutral"
-    tokens = tokenization(str(text))
+    
+    # Reuse tokens if provided, otherwise tokenize once
+    if tokens is None:
+        tokens = tokenization(str(text))
+        
     if not tokens:
         return "Neutral"
+        
     counts = {e: 0 for e in EMOTION_LEXICON}
     for word in tokens:
+        word_lower = word.lower()
         for emotion, keywords in EMOTION_LEXICON.items():
-            if word in keywords:
+            if word_lower in keywords:
                 counts[emotion] += 1
+                
     best = max(counts, key=counts.get)
     if counts[best] == 0:
         return "Neutral"

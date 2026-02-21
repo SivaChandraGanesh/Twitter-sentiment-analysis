@@ -144,7 +144,7 @@ def get_session_stats() -> dict:
     return dict(_session_stats)
 
 
-def reset_session_stats():
+def reset_session_stats(clear_db: bool = False):
     global _session_stats
     _session_stats = {
         "total": 0,
@@ -152,6 +152,17 @@ def reset_session_stats():
         "emotion": {},
         "started_at": None,
     }
+    if clear_db:
+        delete_all_records()
+
+
+def delete_all_records():
+    """Wipe all records from the database table."""
+    from sqlmodel import delete
+    with Session(engine) as session:
+        session.exec(delete(Record))
+        session.commit()
+    logger.info("[DATABASE] All records cleared.")
 
 
 def is_running() -> bool:

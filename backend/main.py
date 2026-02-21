@@ -92,6 +92,3 @@ def health():
     }
 
 
-@app.get("/api/dataset/preview", tags=["Upload"])
-def dataset_preview():
-    return {"message": "Upload a file via POST /api/upload to get a preview."}

@@ -5,11 +5,14 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { useWebSocket } from "@/lib/useWebSocket";
 import { startStream, stopStream, resetStream } from "@/lib/api";
+import axios from "axios";
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
 import type { LiveRecord } from "@/lib/useWebSocket";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 const SENTIMENT_COLORS: Record<string, string> = {
   Positive: "#22c55e", Neutral: "#94a3b8", Negative: "#ef4444",
@@ -18,16 +21,43 @@ const EMOTION_COLORS = ["#3b82f6", "#fbbf24", "#ef4444", "#a855f7", "#22c55e", "
 
 type TimePoint = { time: string; Positive: number; Negative: number; Neutral: number };
 
+type DbStats = {
+  total_records: number;
+  positive: number;
+  negative: number;
+  neutral: number;
+  dominant_emotion: string;
+};
+
+type VizData = {
+  sentiment_distribution: Record<string, number>;
+  emotion_distribution: Record<string, number>;
+  total: number;
+};
+
 export default function Dashboard() {
   const router = useRouter();
   const [isAuth, setIsAuth] = useState(false);
   const { connected, streamRunning, stats, records, latestRecord } = useWebSocket();
   const [timeData, setTimeData] = useState<TimePoint[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
+  const [dbStats, setDbStats] = useState<DbStats | null>(null);
+  const [dbViz, setDbViz] = useState<VizData | null>(null);
+
+  const fetchDbData = async () => {
+    try {
+      const [summaryRes, vizRes] = await Promise.all([
+        axios.get<DbStats>(`${API_BASE}/api/dashboard/summary`),
+        axios.get<VizData>(`${API_BASE}/api/dashboard`),
+      ]);
+      setDbStats(summaryRes.data);
+      setDbViz(vizRes.data);
+    } catch { /* backend may not be ready yet */ }
+  };
 
   useEffect(() => {
     if (localStorage.getItem("isLoggedIn") !== "true") router.push("/login");
-    else setIsAuth(true);
+    else { setIsAuth(true); fetchDbData(); }
   }, [router]);
 
   // Build rolling 60-second time series from incoming records
@@ -66,16 +96,41 @@ export default function Dashboard() {
   const handleReset = async () => {
     setActionLoading(true);
     await resetStream().catch(() => null);
+    await fetchDbData(); // Refresh to show 0s
+    setTimeData([]);     // Clear trend line
     setActionLoading(false);
   };
 
   if (!isAuth) return null;
 
-  const total = stats.total;
-  const sentimentPie = Object.entries(stats.sentiment)
+  // Prefer live WebSocket data when the stream is running; fall back to DB data
+  const liveTotal = stats.total;
+  const total = liveTotal > 0 ? liveTotal : (dbStats?.total_records ?? 0);
+
+  // Merge: use live ws emotion if available, else DB viz emotion data
+  const emotionSource: Record<string, number> =
+    Object.keys(stats.emotion).length > 0
+      ? stats.emotion
+      : dbViz?.emotion_distribution ?? {};
+
+  const sentimentSource: Record<string, number> =
+    liveTotal > 0
+      ? stats.sentiment
+      : dbViz?.sentiment_distribution ?? {};
+
+  const sentimentPie = Object.entries(sentimentSource)
     .filter(([, v]) => v > 0)
     .map(([name, value]) => ({ name, value }));
-  const positivePct = total > 0 ? Math.round(((stats.sentiment.Positive || 0) / total) * 100) : 0;
+
+  const positivePct = total > 0
+    ? Math.round(((sentimentSource.Positive || 0) / total) * 100)
+    : 0;
+  const negativePct = total > 0
+    ? Math.round(((sentimentSource.Negative || 0) / total) * 100)
+    : 0;
+  const neutralPct = total > 0
+    ? Math.round(((sentimentSource.Neutral || 0) / total) * 100)
+    : 0;
 
   return (
     <div className="flex flex-col bg-white min-h-screen">
@@ -85,12 +140,18 @@ export default function Dashboard() {
         <div className="mb-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${connected ? (streamRunning ? "bg-green-100 text-green-700" : "bg-yellow-100 text-yellow-700")
-                : "bg-red-100 text-red-600"
+              : "bg-red-100 text-red-600"
               }`}>
-              <span className={`h-2 w-2 rounded-full ${connected ? (streamRunning ? "bg-green-500 animate-pulse" : "bg-yellow-400") : "bg-red-500"}`} />
+              <span className={`h-2 w-2 rounded-full ${connected ? (streamRunning ? "bg-green-500 animate-pulse" : "bg-yellow-400") : "bg-red-500"
+                }`} />
               {connected ? (streamRunning ? "LIVE" : "PAUSED") : "DISCONNECTED"}
             </span>
             <span className="text-xs text-gray-500">{total.toLocaleString()} records analyzed</span>
+            {dbStats && liveTotal === 0 && (
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                📁 Dataset loaded
+              </span>
+            )}
           </div>
           <div className="flex gap-2">
             <button onClick={handleReset} disabled={actionLoading || streamRunning}
@@ -128,16 +189,12 @@ export default function Dashboard() {
           <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="mb-2 text-2xl">😞</div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Negative</p>
-            <p className="mt-1 text-3xl font-bold text-red-500">
-              {total > 0 ? Math.round(((stats.sentiment.Negative || 0) / total) * 100) : 0}%
-            </p>
+            <p className="mt-1 text-3xl font-bold text-red-500">{negativePct}%</p>
           </div>
           <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="mb-2 text-2xl">😐</div>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Neutral</p>
-            <p className="mt-1 text-3xl font-bold text-gray-600">
-              {total > 0 ? Math.round(((stats.sentiment.Neutral || 0) / total) * 100) : 0}%
-            </p>
+            <p className="mt-1 text-3xl font-bold text-gray-600">{neutralPct}%</p>
           </div>
         </div>
 
@@ -167,7 +224,7 @@ export default function Dashboard() {
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h3 className="mb-4 text-base font-semibold text-gray-900">Live Emotion Breakdown</h3>
             <div className="space-y-3">
-              {Object.entries(stats.emotion).map(([emo, count], i) => {
+              {Object.entries(emotionSource).map(([emo, count], i) => {
                 const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                 return (
                   <div key={emo}>
@@ -182,8 +239,8 @@ export default function Dashboard() {
                   </div>
                 );
               })}
-              {Object.keys(stats.emotion).length === 0 && (
-                <p className="text-sm text-gray-400">Start the stream to see live emotions.</p>
+              {Object.keys(emotionSource).length === 0 && (
+                <p className="text-sm text-gray-400">Start the stream or upload a CSV to see emotions.</p>
               )}
             </div>
           </div>
@@ -195,8 +252,8 @@ export default function Dashboard() {
               {records.slice(0, 20).map((r, i) => (
                 <div key={`${r.id}-${i}`}
                   className={`rounded-lg border p-2 text-xs transition-all ${r.sentiment === "Positive" ? "border-green-200 bg-green-50"
-                      : r.sentiment === "Negative" ? "border-red-200 bg-red-50"
-                        : "border-gray-200 bg-gray-50"
+                    : r.sentiment === "Negative" ? "border-red-200 bg-red-50"
+                      : "border-gray-200 bg-gray-50"
                     }`}>
                   <p className="line-clamp-2 text-gray-700">{r.text}</p>
                   <div className="mt-1 flex gap-2">

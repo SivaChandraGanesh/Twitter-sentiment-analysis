@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Header from "@/components/Header";
 import { useWebSocket } from "@/lib/useWebSocket";
-import { getCsvExportUrl } from "@/lib/api";
+import { getCsvExportUrl, getDashboardData, getPreview } from "@/lib/api";
 import type { LiveRecord } from "@/lib/useWebSocket";
 
 const COLUMNS = ["Text", "Clean Text", "Sentiment", "Confidence", "Emotion", "Time"];
@@ -14,15 +14,40 @@ const SENTIMENT_COLORS: Record<string, string> = {
 };
 
 export default function SentimentPage() {
-  const { connected, streamRunning, stats, records } = useWebSocket();
+  const { connected, streamRunning, stats, records: liveRecords } = useWebSocket();
   const [filter, setFilter] = useState<"all" | "Positive" | "Negative" | "Neutral">("all");
+  const [dbStats, setDbStats] = useState<any>(null);
+  const [dbRecords, setDbRecords] = useState<any[]>([]);
 
-  const total = stats.total;
-  const pos = stats.sentiment.Positive || 0;
-  const neg = stats.sentiment.Negative || 0;
-  const neu = stats.sentiment.Neutral || 0;
+  useEffect(() => {
+    // Fetch initial data from DB
+    getDashboardData().then(setDbStats).catch(() => null);
+    getPreview(50).then(res => setDbRecords(res.preview)).catch(() => null);
+  }, []);
 
-  const filtered: LiveRecord[] = filter === "all" ? records : records.filter((r) => r.sentiment === filter);
+  // Merge statistics: use live stats if stream is active, else fall back to DB stats
+  const total = streamRunning || stats.total > 0 ? stats.total : (dbStats?.total ?? 0);
+  const pos = streamRunning || stats.total > 0 ? (stats.sentiment.Positive || 0) : (dbStats?.sentiment_distribution?.Positive || 0);
+  const neg = streamRunning || stats.total > 0 ? (stats.sentiment.Negative || 0) : (dbStats?.sentiment_distribution?.Negative || 0);
+
+  // Combine records: Live records first, then DB records (preventing duplicates if possible)
+  const combinedRecords = [...liveRecords];
+  const liveIds = new Set(liveRecords.map(r => r.id));
+  dbRecords?.forEach(r => {
+    if (r && !liveIds.has(r.id)) {
+      combinedRecords.push({
+        id: r.id,
+        text: r.text,
+        clean_text: r.clean_text,
+        sentiment: r.sentiment,
+        emotion: r.emotion,
+        confidence: r.confidence,
+        timestamp: r.created_at || new Date().toISOString()
+      });
+    }
+  });
+
+  const filtered: any[] = filter === "all" ? combinedRecords : combinedRecords.filter((r) => r.sentiment === filter);
 
   return (
     <div className="flex flex-col bg-white min-h-screen">
@@ -64,7 +89,7 @@ export default function SentimentPage() {
             <button key={f} onClick={() => setFilter(f)}
               className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${filter === f ? "bg-blue-600 text-white" : "border border-gray-300 text-gray-600 hover:bg-gray-50"
                 }`}>
-              {f === "all" ? `All (${records.length})` : `${f} (${records.filter(r => r.sentiment === f).length})`}
+              {f === "all" ? `All (${combinedRecords.length})` : `${f} (${combinedRecords.filter((r: any) => r.sentiment === f).length})`}
             </button>
           ))}
         </div>

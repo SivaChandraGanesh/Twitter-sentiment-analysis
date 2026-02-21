@@ -6,7 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session
 
 from database.db import get_session
-from services.visualize_service import get_visualization_data, get_dashboard_summary
+from services.visualize_service import (
+    get_visualization_data, get_dashboard_summary, get_dataset_preview
+)
 
 router = APIRouter(prefix="/api", tags=["Visualizations"])
 
@@ -37,3 +39,11 @@ def dashboard_summary(session: Session = Depends(get_session)):
 @router.get("/dashboard")
 def dashboard_compat(session: Session = Depends(get_session)):
     return get_visualization_data(session)
+
+
+@router.get("/dataset/preview")
+def dataset_preview(limit: int = 50, session: Session = Depends(get_session)):
+    """
+    Return a preview of the analyzed dataset.
+    """
+    return get_dataset_preview(session, limit)

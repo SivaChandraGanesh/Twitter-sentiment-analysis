@@ -1,8 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Header from "@/components/Header";
 import { useWebSocket } from "@/lib/useWebSocket";
-import { getCsvExportUrl } from "@/lib/api";
+import { getCsvExportUrl, getDashboardData, getPreview } from "@/lib/api";
 import {
   BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
@@ -14,16 +15,30 @@ const EMOTION_EMOJIS: Record<string, string> = {
 const COLORS = ["#fbbf24", "#ef4444", "#3b82f6", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16"];
 
 export default function EmotionPage() {
-  const { connected, streamRunning, stats, records } = useWebSocket();
+  const { connected, streamRunning, stats, records: liveRecords } = useWebSocket();
+  const [dbStats, setDbStats] = useState<any>(null);
+  const [dbRecords, setDbRecords] = useState<any[]>([]);
 
-  const total = stats.total;
-  const emotionData = Object.entries(stats.emotion).map(([name, count], i) => ({
-    name, count, pct: total > 0 ? Math.round((count / total) * 100) : 0, color: COLORS[i % COLORS.length],
+  useEffect(() => {
+    getDashboardData().then(setDbStats).catch(() => null);
+    getPreview(20).then(res => setDbRecords(res.preview)).catch(() => null);
+  }, []);
+
+  const total = streamRunning || stats.total > 0 ? stats.total : (dbStats?.total ?? 0);
+  const emotionSource = streamRunning || stats.total > 0 ? stats.emotion : (dbStats?.emotion_distribution ?? {});
+
+  const emotionData = Object.entries(emotionSource).map(([name, count], i) => ({
+    name, count: count as number, pct: total > 0 ? Math.round(((count as number) / total) * 100) : 0, color: COLORS[i % COLORS.length],
   }));
   const dominant = emotionData.sort((a, b) => b.count - a.count)[0];
 
-  // Last 20 records for live feed
-  const recentEmotions = records.slice(0, 20);
+  // Combine records for live feed
+  const combinedRecords = [...liveRecords];
+  const liveIds = new Set(liveRecords.map(r => r.id));
+  dbRecords?.forEach(r => {
+    if (r && !liveIds.has(r.id)) combinedRecords.push(r);
+  });
+  const recentRecords = combinedRecords.slice(0, 20);
 
   return (
     <div className="flex flex-col bg-white min-h-screen">
@@ -78,9 +93,9 @@ export default function EmotionPage() {
           <div className="rounded-xl border border-gray-200 bg-blue-600 p-6 text-white shadow-sm">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-100">LATEST EMOTIONS</p>
             <div className="h-40 overflow-y-auto space-y-1">
-              {recentEmotions.length === 0 ? (
+              {recentRecords.length === 0 ? (
                 <p className="text-sm text-blue-200">Start the stream to see live emotions.</p>
-              ) : recentEmotions.map((r, i) => (
+              ) : recentRecords.map((r: any, i: number) => (
                 <div key={`${r.id}-${i}`} className="flex items-center gap-2 text-sm">
                   <span>{EMOTION_EMOJIS[r.emotion] ?? "🧠"}</span>
                   <span className="text-blue-100 font-medium">{r.emotion}</span>

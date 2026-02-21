@@ -84,3 +84,17 @@ def get_dashboard_summary(session: Session) -> dict:
         "negative": sentiment_counts.get("Negative", 0),
         "dominant_emotion": dominant_emotion,
     }
+
+
+def get_dataset_preview(session: Session, limit: int = 50) -> dict:
+    """
+    Return a list of records for previewing.
+    """
+    from sqlmodel import func
+    records = session.exec(select(Record).order_by(Record.id.desc()).limit(limit)).all()
+    total = session.exec(select(func.count(Record.id))).one()
+
+    return {
+        "preview": [r.model_dump() if hasattr(r, "model_dump") else r.dict() for r in records],
+        "total": total,
+    }
