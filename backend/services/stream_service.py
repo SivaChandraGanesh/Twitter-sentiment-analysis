@@ -179,7 +179,7 @@ async def _process_and_broadcast(text: str):
     emotion = emotion_detector(clean or text)
     # 4. Persist
     record = Record(
-        raw_text=text,
+        text=text,
         clean_text=clean,
         sentiment=sentiment,
         emotion=emotion,

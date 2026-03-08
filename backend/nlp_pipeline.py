@@ -20,6 +20,11 @@ try:
     nltk.data.find("tokenizers/punkt")
 except LookupError:
     nltk.download("punkt", quiet=True)
+# punkt_tab is required by newer NLTK versions (3.8+) for word_tokenize
+try:
+    nltk.data.find("tokenizers/punkt_tab")
+except LookupError:
+    nltk.download("punkt_tab", quiet=True)
 try:
     nltk.data.find("corpora/brown")
 except LookupError:
@@ -81,9 +86,15 @@ def remove_stopwords(tokens: List[str]) -> List[str]:
 
 
 def tokenization(text: str) -> List[str]:
-    """Tokenize and optionally remove stopwords for display; returns words only."""
+    """Tokenize and optionally remove stopwords for display; returns words only.
+    Falls back to simple split() if NLTK tokenizer is unavailable.
+    """
     cleaned = clean_text(text)
-    tokens = nltk.word_tokenize(cleaned)
+    try:
+        tokens = nltk.word_tokenize(cleaned)
+    except Exception:
+        # Fallback: simple whitespace split — still good enough for emotion detection
+        tokens = cleaned.split()
     return remove_stopwords(tokens)
 
 
@@ -99,15 +110,15 @@ def sentiment_classifier(text: str) -> Tuple[str, float]:
     polarity = blob.sentiment.polarity
     # Blend: VADER compound and TextBlob polarity
     score = 0.6 * compound + 0.4 * polarity
-    if score > 0.15:
+    if score > 0.05:
         label = "Positive"
         conf = min(0.99, 0.5 + abs(score))
-    elif score < -0.15:
+    elif score < -0.05:
         label = "Negative"
         conf = min(0.99, 0.5 + abs(score))
     else:
         label = "Neutral"
-        conf = 0.5 + (0.3 - abs(score))
+        conf = 0.5 + (0.15 - abs(score))
     return label, round(conf, 2)
 
 
